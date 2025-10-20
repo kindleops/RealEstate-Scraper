@@ -6,6 +6,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.action_chains import ActionChains
+from webdriver_manager.chrome import ChromeDriverManager
 import os
 import time
 from dotenv import load_dotenv
@@ -15,11 +16,10 @@ load_dotenv()
 EMAIL = os.getenv("DEALMACHINE_EMAIL")
 PASSWORD = os.getenv("DEALMACHINE_PASSWORD")
 BRAVE_PATH = os.getenv("BRAVE_PATH")
-CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH")
 
 def get_driver():
     options = Options()
-    options.binary_location = BRAVE_PATH
+    options.binary_location = os.getenv("BRAVE_PATH")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--disable-extensions")
@@ -29,18 +29,22 @@ def get_driver():
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    service = Service(CHROMEDRIVER_PATH)
+    # ✅ webdriver-manager 4.x uses driver_version instead of version
+    service = Service(ChromeDriverManager(driver_version="135.0.7049.52").install())
+
     driver = webdriver.Chrome(service=service, options=options)
     driver.set_page_load_timeout(60)
     return driver
 
+
 def login(driver):
+    """Authenticate into DealMachine."""
     try:
         driver.get("https://app.dealmachine.com/login")
         print("[>] Opened DealMachine login page")
         time.sleep(2)
 
-        # Email field
+        # Email
         email_input = WebDriverWait(driver, 20).until(
             EC.visibility_of_element_located((By.XPATH, "//input[@placeholder='Email Address']"))
         )
@@ -48,7 +52,7 @@ def login(driver):
         email_input.send_keys(EMAIL)
         print("[+] Email entered")
 
-        # Password field
+        # Password
         password_input = WebDriverWait(driver, 10).until(
             EC.visibility_of_element_located((By.XPATH, "//input[@placeholder='Password']"))
         )
@@ -56,23 +60,20 @@ def login(driver):
         password_input.send_keys(PASSWORD)
         print("[+] Password entered")
 
-        # Login button is actually a styled div, not a <button>
+        # Click the styled div login button
         login_button = WebDriverWait(driver, 15).until(
             EC.element_to_be_clickable((By.XPATH, "//div[text()='Continue With Email']"))
         )
-
-        # Scroll and click
+        driver.execute_script("arguments[0].scrollIntoView(true);", login_button)
+        time.sleep(0.5)
         try:
-            driver.execute_script("arguments[0].scrollIntoView(true);", login_button)
-            time.sleep(0.5)
             login_button.click()
-            print("[+] Clicked login button normally (div element)")
-        except:
+        except Exception:
             driver.execute_script("arguments[0].click();", login_button)
-            print("[+] Clicked login button with JS fallback")
+        print("[+] Clicked login button")
 
-        # Wait for redirect (dashboard)
-        WebDriverWait(driver, 20).until(
+        # Wait for dashboard redirect
+        WebDriverWait(driver, 25).until(
             lambda d: "login" not in d.current_url and "app.dealmachine.com" in d.current_url
         )
         print("[✅] Login successful")

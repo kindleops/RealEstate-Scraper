@@ -1,24 +1,28 @@
 from scraper.login_utils import get_driver, login
 from scraper.zip_search import search_zip
 from scraper.scraper_core import scroll_and_scrape_properties
+from filters import apply_quick_filters
 from airtable.table_router import route_and_upload
-from filters import apply_basic_filters
 
-# List of ZIPs to process
-ZIP_CODES = ["90210", "33139", "10001"]  # Replace with your real targets
+# 🗺️ ZIPs to process — replace or import from your /markets files
+ZIP_CODES = ["33147", "33127", "33054"]  # Example: Miami-Dade test set
+
 
 def main():
-    driver = get_driver()
+    print("🚀 Starting DealMachine Scraper...\n")
 
+    driver = get_driver()
     if not driver:
         print("[!] Driver failed to initialize")
         return
 
     try:
+        # 1️⃣ Login
         if not login(driver):
             print("[!] Login failed")
             return
 
+        # 2️⃣ Loop through ZIPs
         for zip_code in ZIP_CODES:
             print(f"\n===== Processing ZIP: {zip_code} =====")
             success = search_zip(driver, zip_code)
@@ -27,24 +31,25 @@ def main():
                 print(f"[!] Skipping ZIP {zip_code} due to search failure")
                 continue
 
-            apply_basic_filters(driver, quick_filters=["Vacant", "High Equity"])
+            # 3️⃣ Apply filters (you can swap for advanced later)
+            apply_quick_filters(driver, filters=["Vacant", "High Equity"])
 
-            # Scrape all sidebar property cards
+            # 4️⃣ Scrape all sidebar property cards
             property_cards = scroll_and_scrape_properties(driver)
 
             if not property_cards:
                 print(f"[!] No properties found in ZIP {zip_code}")
                 continue
 
+            # 5️⃣ Upload each property to Airtable
             for i, prop_data in enumerate(property_cards, start=1):
-                print(f"\n--- Uploading Property #{i}: {prop_data.get('full_address')} ---")
+                print(f"\n--- Uploading Property #{i}: {prop_data.get('address')} ---")
 
-                # Wrap scraped card into a fake full record for now
                 fake_record = {
                     "property": {
-                        "full_address": prop_data.get("full_address"),
+                        "full_address": prop_data.get("address"),
                         "seller_name": prop_data.get("owner_name"),
-                        "status": prop_data.get("status")
+                        "estimated_value": prop_data.get("estimated_value"),
                     },
                     "seller": {},
                     "mortgage": [],
@@ -58,13 +63,17 @@ def main():
                     "foreclosures": []
                 }
 
-                route_and_upload(fake_record)
+                try:
+                    route_and_upload(fake_record)
+                except Exception as e:
+                    print(f"⚠️ Upload failed: {e}")
 
             print(f"[✓] Completed ZIP: {zip_code} — {len(property_cards)} properties uploaded")
 
     finally:
         driver.quit()
-        print("[✓] Driver closed")
+        print("\n[✓] Driver closed\n✅ Scraper finished successfully.")
+
 
 if __name__ == "__main__":
     main()
