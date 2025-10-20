@@ -9,20 +9,34 @@ def search_zip(driver, zip_code):
     print(f"\n🔍 Searching ZIP: {zip_code}")
     zip_code = str(zip_code).strip()
 
-    # Scroll to top for safety
+    def wait_for_overlay_to_clear():
+        try:
+            WebDriverWait(driver, 10).until_not(
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@style,'position: fixed') and contains(@style,'width: 100%')]"))
+            )
+            print("🧹 Overlay cleared, ready to click")
+        except TimeoutException:
+            print("⚠️ Overlay still visible, proceeding carefully")
+
+    # Clear old searches
     try:
-        driver.execute_script("window.scrollTo(0, 0);")
-    except:
+        clear_buttons = driver.find_elements(By.XPATH, "//button[contains(@aria-label,'clear') or contains(@class,'clear')]")
+        for b in clear_buttons:
+            driver.execute_script("arguments[0].click();", b)
+            time.sleep(0.3)
+    except Exception:
         pass
 
-    # Find search input
+    # Scroll to top
+    driver.execute_script("window.scrollTo(0, 0);")
+
+    # Find search bar
     search_input = None
-    selectors = [
+    for selector in [
         '//input[contains(@placeholder, "Search")]',
         '//input[@type="search"]',
         '//input[@role="searchbox"]'
-    ]
-    for selector in selectors:
+    ]:
         try:
             search_input = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, selector))
@@ -32,41 +46,47 @@ def search_zip(driver, zip_code):
             continue
 
     if not search_input:
-        print("❌ Search input not found.")
+        print("❌ Could not locate search input.")
         return False
 
     # Type ZIP
-    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", search_input)
-    search_input.click()
+    wait_for_overlay_to_clear()
+    driver.execute_script("arguments[0].scrollIntoView({block:'center'});", search_input)
+    driver.execute_script("arguments[0].click();", search_input)
+    time.sleep(0.3)
     search_input.send_keys(Keys.CONTROL, 'a')
     search_input.send_keys(Keys.BACKSPACE)
     search_input.send_keys(zip_code)
-    print(f"✏️ Typed ZIP {zip_code} into search field")
+    print(f"✏️ Typed ZIP {zip_code}")
 
-    # Wait for dropdown and try to click suggestion
+    # Try dropdown selection
+    suggestion_xpath = f"//*[contains(text(), '{zip_code}') and (contains(@class,'autocomplete') or contains(@class,'menu') or name()='div')]"
     try:
-        suggestion_xpath = f"//div[contains(@class,'autocomplete')]//*[contains(text(), '{zip_code}')]"
-        suggestion = WebDriverWait(driver, 5).until(
+        suggestion = WebDriverWait(driver, 3).until(
             EC.element_to_be_clickable((By.XPATH, suggestion_xpath))
         )
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", suggestion)
-        time.sleep(0.5)
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", suggestion)
+        time.sleep(0.3)
         try:
             suggestion.click()
         except ElementClickInterceptedException:
             driver.execute_script("arguments[0].click();", suggestion)
-        print(f"🖱️ Clicked suggestion for ZIP {zip_code}")
+        print(f"🖱️ Clicked dropdown suggestion for {zip_code}")
     except TimeoutException:
-        print("⚠️ No suggestion dropdown visible, pressing Enter instead")
+        print("⚠️ No dropdown suggestion found — using arrow + enter fallback")
+        search_input.send_keys(Keys.ARROW_DOWN)
         search_input.send_keys(Keys.ENTER)
 
-    # Wait for property list to load
-    sidebar_selector = "//div[contains(@class, 'deal-scroll')]//div[contains(@class,'deal-wrapper') or contains(@class,'property-card')]"
+    # Wait for overlay to vanish before reading properties
+    wait_for_overlay_to_clear()
+
+    # Wait for property sidebar
+    sidebar_selector = "//div[contains(@class,'deal-scroll')]//div[contains(@class,'deal-wrapper') or contains(@class,'property-card')]"
     try:
-        WebDriverWait(driver, 20).until(
+        WebDriverWait(driver, 25).until(
             EC.presence_of_element_located((By.XPATH, sidebar_selector))
         )
-        print(f"✅ Properties loaded successfully for ZIP {zip_code}")
+        print(f"✅ Properties loaded for ZIP {zip_code}")
         return True
     except TimeoutException:
         print(f"⚠️ No property cards appeared for ZIP {zip_code}")
