@@ -2,7 +2,7 @@ from scraper.login_utils import get_driver, login
 from scraper.zip_search import search_zip
 from scraper.scraper_core import scroll_and_scrape_properties
 from filters import apply_quick_filters
-from airtable.table_router import route_and_upload
+from airtable_utils.table_router import route_and_upload
 
 # 🗺️ ZIPs to process — replace or import from your /markets files
 ZIP_CODES = ["33147", "33127", "33054"]  # Example: Miami-Dade test set
