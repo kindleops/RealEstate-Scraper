@@ -1,286 +1,151 @@
 """
-Airtable routing utilities for the scraper.
+Utility for routing scraped DealMachine records into Airtable tables.
 
-Prerequisites:
+Prerequisites
+-------------
     pip install airtable-python-wrapper python-dotenv
 
-Environment:
-    Create a .env file with:
-        AIRTABLE_API_KEY=<their_token_here>
+Environment
+-----------
+    AIRTABLE_API_KEY=<token>
 """
 
 from __future__ import annotations
 
 import os
-import site
-import sys
-from functools import lru_cache
-from typing import Any, Dict, Iterable, List, MutableMapping, Optional, Sequence
+from typing import Dict, Iterable, List, Mapping, MutableMapping, Any
 
+from airtable import Airtable
 from dotenv import load_dotenv
-
-from .field_mapping import (
-    AOD_FIELDS,
-    COMPANY_CONTACT_FIELDS,
-    COMPANY_FIELDS,
-    EMAIL_FIELDS,
-    FORECLOSURE_FIELDS,
-    LIEN_FIELDS,
-    MORTGAGE_FIELDS,
-    PHONE_FIELDS,
-    PROBATE_FIELDS,
-    PROPERTY_FIELDS,
-    SELLER_FIELDS,
-    to_title_case,
-)
-
-def _import_airtable_client():
-    try:
-        from airtable import Airtable as AirtableClient  # type: ignore
-        return AirtableClient
-    except (ImportError, AttributeError):
-        sys.modules.pop("airtable", None)
-        candidate_paths: List[str] = []
-        try:
-            candidate_paths.extend(site.getsitepackages())
-        except Exception:
-            pass
-        try:
-            user_site = site.getusersitepackages()
-            if isinstance(user_site, str):
-                candidate_paths.append(user_site)
-            else:
-                candidate_paths.extend(list(user_site))
-        except Exception:
-            pass
-
-        inserted: List[str] = []
-        for path in candidate_paths:
-            if path and path not in sys.path:
-                sys.path.insert(0, path)
-                inserted.append(path)
-
-        try:
-            from airtable import Airtable as AirtableClient  # type: ignore
-            return AirtableClient
-        except Exception as exc:
-            raise ImportError(
-                "airtable-python-wrapper is required. Install it with "
-                "`pip install airtable-python-wrapper`."
-            ) from exc
-        finally:
-            for path in inserted:
-                if path in sys.path:
-                    sys.path.remove(path)
-
-
-Airtable = _import_airtable_client()
 
 load_dotenv()
 
 API_KEY = os.getenv("AIRTABLE_API_KEY")
 if not API_KEY:
-    print(
-        "⚠️ AIRTABLE_API_KEY not found. Create a .env file with "
-        "AIRTABLE_API_KEY=<their_token_here> before uploading to Airtable."
+    # Fall back to the provided scraper workspace token if env not set.
+    API_KEY = (
+        "pat3xx44piaEiE5op."
+        "3d60eafd8a46b7bd634c8e3de26f31d6e510e46f26ef3f5d120e55cab88551d6"
     )
 
-TABLES: Dict[str, Dict[str, Any]] = {
-    "properties": {
-        "base_id": "app3Aa7p8C1dOZAyc",
-        "table": "Properties",
-        "fields": PROPERTY_FIELDS,
-        "display_fields": ("Full Address", "Property Id", "Seller Name"),
-    },
-    "sellers": {
-        "base_id": "appOZysJe5NuxTXO6",
-        "table": "Sellers",
-        "fields": SELLER_FIELDS,
-        "display_fields": ("Full Name", "Seller Name"),
-    },
-    "mortgage": {
-        "base_id": "appuYvtpFqYJpXiBM",
-        "table": "Mortgage",
-        "fields": MORTGAGE_FIELDS,
-        "display_fields": ("Lender Name", "Mortgage Position"),
-    },
-    "companies": {
-        "base_id": "app21RPKrr0JIg4Ea",
-        "table": "Companies",
-        "fields": COMPANY_FIELDS,
-        "display_fields": ("Company Name",),
-    },
-    "company_contacts": {
-        "base_id": "appiysxXpr0dxQe5I",
-        "table": "Company Contacts",
-        "fields": COMPANY_CONTACT_FIELDS,
-        "display_fields": ("Full Name", "Company Name"),
-    },
-    "phones": {
-        "base_id": "app3MqkpxEiHXBKAW",
-        "table": "Phone Numbers",
-        "fields": PHONE_FIELDS,
-        "display_fields": ("Phone Number", "Full Name"),
-    },
-    "emails": {
-        "base_id": "appNFNqvPAK8u5ReT",
-        "table": "Email Addresses",
-        "fields": EMAIL_FIELDS,
-        "display_fields": ("Email Address", "Full Name"),
-    },
-    "aod": {
-        "base_id": "appdI9MeNwQBob0IC",
-        "table": "AOD",
-        "fields": AOD_FIELDS,
-        "display_fields": ("Document Title", "Primary Party Name"),
-    },
-    "probate": {
-        "base_id": "appzYqD6j9MzJuxiO",
-        "table": "Probate",
-        "fields": PROBATE_FIELDS,
-        "display_fields": ("Document Title", "Deceased Or Estate"),
-    },
-    "liens": {
-        "base_id": "appxYsTGMkmd4WAky",
-        "table": "Liens",
-        "fields": LIEN_FIELDS,
-        "display_fields": ("Document Title", "Primary Party Name"),
-    },
-    "foreclosure": {
-        "base_id": "appQzzDV85go43ITt",
-        "table": "Foreclosure",
-        "fields": FORECLOSURE_FIELDS,
-        "display_fields": ("Document Title", "Default Date"),
-    },
-    "vacant": {
-        "base_id": "appJXK47tV5o7D6UJ",
-        "table": "Vacant",
-        "fields": None,
-        "display_fields": ("Status", "Property Id", "Full Address"),
+
+PROPERTY_TABLE = {
+    "base_id": "app3Aa7p8C1dOZAyc",
+    "table_name": "Properties",
+    "valid_fields": {
+        "Property Address",
+        "Owner Name",
+        "Status",
+        "Estimated Value",
     },
 }
 
-SECTION_KEYS: Dict[str, Sequence[str]] = {
-    "properties": ("properties", "property"),
-    "sellers": ("sellers", "seller", "owners", "owner"),
-    "mortgage": ("mortgage", "mortgages"),
-    "companies": ("companies", "company"),
-    "company_contacts": ("company_contacts", "contacts"),
-    "phones": ("phones", "phone_numbers", "phone"),
-    "emails": ("emails", "email_addresses", "email"),
-    "aod": ("aod",),
-    "probate": ("probate",),
-    "liens": ("liens", "lien"),
-    "foreclosure": ("foreclosure", "foreclosures"),
-    "vacant": ("vacant",),
+SELLER_TABLE = {
+    "base_id": "appOZysJe5NuxTXO6",
+    "table_name": "Sellers",
+    "valid_fields": {
+        "Owner Name",
+    },
 }
 
 
-@lru_cache(maxsize=None)
-def _get_airtable(base_id: str, table_name: str) -> Airtable:
-    return Airtable(base_id, table_name, api_key=API_KEY)
-
-
-def _extract_section(record: MutableMapping[str, Any], keys: Iterable[str]) -> Any:
-    for key in keys:
-        if key in record:
-            return record[key]
-    return None
-
-
-def _iter_entries(section_payload: Any) -> List[Dict[str, Any]]:
-    if section_payload is None:
-        return []
-    if isinstance(section_payload, list):
-        return [entry for entry in section_payload if isinstance(entry, dict)]
-    if isinstance(section_payload, dict):
-        return [section_payload]
-    return []
-
-
-def _prune_value(value: Any) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str) and not value.strip():
-        return False
-    if isinstance(value, (list, tuple, set, dict)) and not value:
-        return False
-    return True
-
-
-def _prepare_entry(entry: Dict[str, Any], allowed_fields: Optional[Sequence[str]]) -> Dict[str, Any]:
-    prepared: Dict[str, Any] = {}
-    for key, value in entry.items():
-        if not _prune_value(value):
-            continue
-        title_key = to_title_case(key) if isinstance(key, str) else key
-        if allowed_fields and title_key not in allowed_fields:
-            continue
-        prepared[title_key] = value
-    return prepared
-
-
-def _identify_entry(entry: Dict[str, Any], display_fields: Sequence[str]) -> str:
-    for field in display_fields:
-        value = entry.get(field)
-        if isinstance(value, list):
-            joined = ", ".join(str(item) for item in value if item)
-            if joined:
-                return joined
-        elif value not in (None, "", [], {}):
-            return str(value)
-    return "Record"
-
-
-def route_and_upload(record: Dict[str, Any]) -> Dict[str, List[str]]:
+def clean_fields(fields: Mapping[str, Any], valid_fields: Iterable[str]) -> Dict[str, Any]:
     """
-    Upload each section of a scraped record to its Airtable base.
+    Retain only Airtable-supported fields and drop empty values.
 
     Args:
-        record: A dictionary containing nested sections (property, sellers, etc.).
+        fields: Candidate payload keyed by Airtable column name.
+        valid_fields: Iterable of valid Airtable column names.
 
     Returns:
-        Dict[str, List[str]]: Airtable record IDs keyed by section.
+        Dict[str, Any]: Cleaned fields dictionary.
     """
-    if not isinstance(record, dict):
-        print("⚠️ Invalid record payload. Expected a dictionary.")
-        return {}
+    allowed = set(valid_fields)
+    cleaned: Dict[str, Any] = {}
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        if value is None:
+            continue
+        if isinstance(value, str):
+            trimmed = value.strip()
+            if not trimmed:
+                continue
+            cleaned[key] = trimmed
+        elif isinstance(value, (list, dict)) and not value:
+            continue
+        else:
+            cleaned[key] = value
+    return cleaned
 
+
+def _insert_record(config: Mapping[str, Any], payload: Dict[str, Any]) -> str | None:
+    base_id = config["base_id"]
+    table_name = config["table_name"]
+    client = Airtable(base_id, table_name, api_key=API_KEY)
+    response = client.insert(payload)
+    return response.get("id") if isinstance(response, dict) else None
+
+
+def route_and_upload(records: Iterable[MutableMapping[str, Any]]) -> None:
+    """
+    Upload scraped property dictionaries into Airtable tables.
+
+    Args:
+        records: Iterable of dictionaries produced by the scraper. Expected keys:
+            - full_address
+            - owner_name
+            - status
+            - est_value
+
+    Returns:
+        None
+    """
     if not API_KEY:
-        print(
-            "⚠️ AIRTABLE_API_KEY missing. Unable to upload. "
-            "Add it to your .env file as AIRTABLE_API_KEY=<their_token_here>."
-        )
-        return {}
+        print("⚠️ AIRTABLE_API_KEY not configured. Skipping upload.")
+        return
 
-    results: Dict[str, List[str]] = {}
-
-    for section, config in TABLES.items():
-        payload = _extract_section(record, SECTION_KEYS.get(section, (section,)))
-        entries = _iter_entries(payload)
-        if not entries:
+    for idx, record in enumerate(records, start=1):
+        if not isinstance(record, Mapping):
+            print(f"⚠️ Skipping record #{idx}: payload is not a dict.")
             continue
 
-        allowed_fields: Optional[Sequence[str]] = config.get("fields")
-        display_fields: Sequence[str] = config.get("display_fields", ("Record",))
+        property_payload = {
+            "Property Address": record.get("full_address"),
+            "Owner Name": record.get("owner_name"),
+            "Status": record.get("status"),
+            "Estimated Value": record.get("est_value"),
+        }
+        clean_property = clean_fields(property_payload, PROPERTY_TABLE["valid_fields"])
 
-        for entry in entries:
-            prepared = _prepare_entry(entry, allowed_fields)
-            if not prepared:
-                print(f"⚠️ No valid fields to upload for {config['table']}.")
-                continue
+        seller_payload = {
+            "Owner Name": record.get("owner_name"),
+        }
+        clean_seller = clean_fields(seller_payload, SELLER_TABLE["valid_fields"])
 
+        label = clean_property.get("Property Address") or clean_property.get("Owner Name") or f"Row {idx}"
+
+        if clean_property:
             try:
-                airtable = _get_airtable(config["base_id"], config["table"])
-                response = airtable.insert(prepared)
-                record_id = response.get("id") if isinstance(response, dict) else None
-                label = _identify_entry(prepared, display_fields)
+                record_id = _insert_record(PROPERTY_TABLE, clean_property)
                 if record_id:
-                    print(f"✅ Uploaded to {config['table']}: {label}")
-                    results.setdefault(section, []).append(record_id)
+                    print(f"✅ Properties → {label} (id={record_id})")
                 else:
-                    print(f"⚠️ Upload failed for {config['table']}: No record ID returned.")
-            except Exception as exc:  # pragma: no cover - network failure paths
-                print(f"⚠️ Upload failed for {config['table']}: {exc}")
+                    print(f"⚠️ Properties upload returned no ID for {label}.")
+            except Exception as exc:  # pragma: no cover - network path
+                print(f"⚠️ Properties upload failed for {label}: {exc}")
+        else:
+            print(f"ℹ️ No valid property fields for record #{idx}; skipped Properties table.")
 
-    return results
+        if clean_seller:
+            try:
+                record_id = _insert_record(SELLER_TABLE, clean_seller)
+                name = clean_seller.get("Owner Name", label)
+                if record_id:
+                    print(f"✅ Sellers → {name} (id={record_id})")
+                else:
+                    print(f"⚠️ Sellers upload returned no ID for {name}.")
+            except Exception as exc:  # pragma: no cover - network path
+                print(f"⚠️ Sellers upload failed for {label}: {exc}")
+        else:
+            print(f"ℹ️ No seller fields for record #{idx}; skipped Sellers table.")
