@@ -1,0 +1,8 @@
+selenium
+python-dotenv
+pyairtable
+requests
+beautifulsoup4
+undetected-chromedriver
+pandas
+colorama
