@@ -71,15 +71,14 @@ def scroll_and_scrape_properties(driver, max_scrolls=20):
                     except NoSuchElementException:
                         pass
 
-                record = {
-                    "Property Address": full_address.strip() if full_address else None,
-                    "Owner Name": owner_name.strip() if owner_name else None,
-                    "Status": status.strip() if status else None,
-                    "Estimated Value": est_value.strip() if est_value else None
-                }
-
-                if any(record.values()) and record not in properties:
-                    properties.append(record)
+                if full_address:
+                    prop = {
+                        "Property Address": full_address.strip(),
+                        "Owner Name": (owner_name or "Unknown").strip() if owner_name else "Unknown",
+                        "Status": status.strip() if status else "",
+                        "Estimated Value": est_value.strip() if est_value else ""
+                    }
+                    properties.append(prop)
 
             except (NoSuchElementException, StaleElementReferenceException):
                 continue
@@ -98,6 +97,6 @@ def scroll_and_scrape_properties(driver, max_scrolls=20):
         last_count = len(cards)
 
     print(f"✅ Total scraped: {len(properties)} properties")
-    if properties:
-        print("🧠 Sample scraped record:", properties[0])
-    return [p for p in properties if isinstance(p, dict) and any(p.values())]
+    valid_properties = [p for p in properties if isinstance(p, dict) and any(p.values())]
+    print(f"🧠 Sample scraped record: {valid_properties[0] if valid_properties else 'No records found'}")
+    return valid_properties
