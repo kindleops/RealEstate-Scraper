@@ -2,12 +2,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
-from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
 
-def scroll_and_scrape_properties(driver, max_scrolls=20):
+def scroll_and_scrape_properties(driver, max_scrolls=30):
     """
     Scrolls through the property sidebar and scrapes visible property cards.
-    Returns a list of dictionaries with key property info.
+    Returns a clean list of dictionaries compatible with Airtable.
     """
 
     print("🌀 Scrolling and scraping property cards...")
@@ -15,15 +14,14 @@ def scroll_and_scrape_properties(driver, max_scrolls=20):
     property_selector = "//div[contains(@class,'deal-scroll')]//div[contains(@class,'deal-wrapper') or contains(@class,'property-card')]"
     properties = []
 
-    # Wait for first cards to appear
     try:
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.XPATH, property_selector))
         )
         print("✅ Property cards detected in sidebar")
     except:
-        print("⚠️ No property cards found initially, waiting...")
-        time.sleep(5)
+        print("⚠️ No property cards found initially.")
+        return []
 
     last_count = 0
     for i in range(max_scrolls):
@@ -32,63 +30,56 @@ def scroll_and_scrape_properties(driver, max_scrolls=20):
 
         for card in cards:
             try:
-                text = card.text.strip()
-                if not text:
-                    continue
+                # Address
+                try:
+                    address_el = card.find_element(By.XPATH, ".//*[contains(@class,'address') or contains(text(), ', FL') or contains(text(), ', TX') or contains(text(), ', CA')]")
+                    full_address = address_el.text.strip()
+                except:
+                    full_address = ""
 
-                # Split lines for flexible pattern parsing
-                lines = [line.strip() for line in text.split("\n") if line.strip()]
-
-                full_address = ""
+                # Owner name
                 owner_name = ""
-                status = ""
-                est_value = ""
-
-                for line in lines:
-                    lower = line.lower()
-
-                    # --- Detect address ---
-                    if ("," in line and any(state in lower for state in ["fl", "tx", "ca", "ny", "az", "nv", "il"])) or "street" in lower or "ave" in lower:
-                        full_address = line
-
-                    # --- Detect owner ---
-                    elif any(x in line for x in ["LLC", "Trust", "Inc", "Corp", "Properties", "Estates"]) or (len(line.split()) <= 3 and line.istitle()):
-                        owner_name = line
-
-                    # --- Detect value ---
-                    elif "$" in line or "est." in lower or "value" in lower:
-                        est_value = line
-
-                    # --- Detect status/tag ---
-                    elif any(x in lower for x in ["lead", "added", "vacant", "absentee", "high equity", "owner occ"]):
-                        status = line
-
-                # Fallback extraction if fields remain empty
-                if not full_address:
+                for path in [".//*[contains(@class,'owner')]", ".//*[contains(text(),'LLC')]", ".//*[contains(text(),'Trust')]"]:
                     try:
-                        address_el = card.find_element(By.XPATH, ".//*[contains(text(), ', ')]")
-                        full_address = address_el.text.strip()
-                    except NoSuchElementException:
-                        pass
+                        owner_name = card.find_element(By.XPATH, path).text.strip()
+                        break
+                    except:
+                        continue
 
+                # Status
+                try:
+                    status_el = card.find_element(By.XPATH, ".//*[contains(@class,'status') or contains(text(),'Lead') or contains(text(),'Added')]")
+                    status = status_el.text.strip()
+                except:
+                    status = ""
+
+                # Estimated value
+                try:
+                    value_el = card.find_element(By.XPATH, ".//*[contains(text(), '$')]")
+                    est_value = value_el.text.strip()
+                except:
+                    est_value = ""
+
+                # ✅ Clean structured record
                 if full_address:
                     prop = {
-                        "Property Address": full_address.strip(),
-                        "Owner Name": (owner_name or "Unknown").strip() if owner_name else "Unknown",
-                        "Status": status.strip() if status else "",
-                        "Estimated Value": est_value.strip() if est_value else ""
+                        "Property Address": full_address,
+                        "Owner Name": owner_name or "Unknown",
+                        "Status": status,
+                        "Estimated Value": est_value
                     }
-                    properties.append(prop)
+                    if prop not in properties:
+                        properties.append(prop)
 
-            except (NoSuchElementException, StaleElementReferenceException):
+            except Exception:
                 continue
 
-        # Scroll sidebar to load more
+        # Scroll down inside sidebar
         driver.execute_script("""
             const sidebar = document.querySelector('.deal-scroll');
             if (sidebar) sidebar.scrollBy(0, sidebar.scrollHeight);
         """)
-        time.sleep(1.25)
+        time.sleep(1.5)
 
         # Stop if no new cards load
         if len(cards) == last_count:
@@ -96,7 +87,11 @@ def scroll_and_scrape_properties(driver, max_scrolls=20):
             break
         last_count = len(cards)
 
-    print(f"✅ Total scraped: {len(properties)} properties")
+    # ✅ Final cleanup before returning
     valid_properties = [p for p in properties if isinstance(p, dict) and any(p.values())]
-    print(f"🧠 Sample scraped record: {valid_properties[0] if valid_properties else 'No records found'}")
+    if valid_properties:
+        print(f"🧠 Sample scraped record: {valid_properties[0]}")
+    else:
+        print("⚠️ No valid property data scraped.")
+    print(f"✅ Total scraped: {len(valid_properties)} valid properties")
     return valid_properties
