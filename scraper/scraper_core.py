@@ -2,6 +2,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
+from selenium.common.exceptions import NoSuchElementException, StaleElementReferenceException
 
 def scroll_and_scrape_properties(driver, max_scrolls=20):
     """
@@ -31,59 +32,65 @@ def scroll_and_scrape_properties(driver, max_scrolls=20):
 
         for card in cards:
             try:
-                # Address
-                address_el = card.find_element(By.XPATH, ".//*[contains(@class,'address') or contains(text(), ', FL') or contains(text(), ', CA') or contains(text(), ', TX')]")
-                full_address = address_el.text.strip()
+                text = card.text.strip()
+                if not text:
+                    continue
 
-                # Owner name
-                owner_el = None
-                for path in [
-                    ".//*[contains(@class,'owner')]",
-                    ".//*[contains(text(), 'LLC')]",
-                    ".//*[contains(text(), 'Trust')]"
-                ]:
-                    try:
-                        owner_el = card.find_element(By.XPATH, path)
-                        break
-                    except:
-                        continue
-                owner_name = owner_el.text.strip() if owner_el else ""
+                # Split lines for flexible pattern parsing
+                lines = [line.strip() for line in text.split("\n") if line.strip()]
 
-                # Status or value
+                full_address = ""
+                owner_name = ""
                 status = ""
-                try:
-                    status_el = card.find_element(By.XPATH, ".//*[contains(@class,'status') or contains(text(),'Lead') or contains(text(),'Added')]")
-                    status = status_el.text.strip()
-                except:
-                    pass
+                est_value = ""
 
-                # Estimated value or price
-                value = ""
-                try:
-                    value_el = card.find_element(By.XPATH, ".//*[contains(text(), '$')]")
-                    value = value_el.text.strip()
-                except:
-                    pass
+                for line in lines:
+                    lower = line.lower()
+
+                    # --- Detect address ---
+                    if ("," in line and any(state in lower for state in ["fl", "tx", "ca", "ny", "az", "nv", "il"])) or "street" in lower or "ave" in lower:
+                        full_address = line
+
+                    # --- Detect owner ---
+                    elif any(x in line for x in ["LLC", "Trust", "Inc", "Corp", "Properties", "Estates"]) or (len(line.split()) <= 3 and line.istitle()):
+                        owner_name = line
+
+                    # --- Detect value ---
+                    elif "$" in line or "est." in lower or "value" in lower:
+                        est_value = line
+
+                    # --- Detect status/tag ---
+                    elif any(x in lower for x in ["lead", "added", "vacant", "absentee", "high equity", "owner occ"]):
+                        status = line
+
+                # Fallback extraction if fields remain empty
+                if not full_address:
+                    try:
+                        address_el = card.find_element(By.XPATH, ".//*[contains(text(), ', ')]")
+                        full_address = address_el.text.strip()
+                    except NoSuchElementException:
+                        pass
 
                 prop = {
-                    "full_address": full_address,
-                    "owner_name": owner_name,
-                    "status": status,
-                    "est_value": value
+                    "full_address": full_address or None,
+                    "owner_name": owner_name or None,
+                    "status": status or None,
+                    "est_value": est_value or None
                 }
 
-                if prop not in properties:
+                # Filter out empties
+                if any(prop.values()) and prop not in properties:
                     properties.append(prop)
 
-            except Exception:
+            except (NoSuchElementException, StaleElementReferenceException):
                 continue
 
-        # Scroll down inside sidebar
+        # Scroll sidebar to load more
         driver.execute_script("""
             const sidebar = document.querySelector('.deal-scroll');
             if (sidebar) sidebar.scrollBy(0, sidebar.scrollHeight);
         """)
-        time.sleep(1.5)
+        time.sleep(1.25)
 
         # Stop if no new cards load
         if len(cards) == last_count:
