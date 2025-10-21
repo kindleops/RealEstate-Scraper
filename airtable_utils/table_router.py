@@ -13,7 +13,8 @@ Environment
 from __future__ import annotations
 
 import os
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Any
+import ast
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping
 
 from airtable import Airtable
 from dotenv import load_dotenv
@@ -87,7 +88,20 @@ def _insert_record(config: Mapping[str, Any], payload: Dict[str, Any]) -> str | 
     return response.get("id") if isinstance(response, dict) else None
 
 
-def route_and_upload(records: Iterable[MutableMapping[str, Any]]) -> None:
+def _coerce_record(record: Any) -> Any:
+    """Convert stringified dictionaries back into real dict objects."""
+    if isinstance(record, str):
+        text = record.strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = ast.literal_eval(text)
+                return parsed
+            except (ValueError, SyntaxError):
+                return record
+    return record
+
+
+def route_and_upload(records: Iterable[Any]) -> None:
     """
     Upload scraped property dictionaries into Airtable tables.
 
@@ -105,21 +119,27 @@ def route_and_upload(records: Iterable[MutableMapping[str, Any]]) -> None:
         print("⚠️ AIRTABLE_API_KEY not configured. Skipping upload.")
         return
 
-    for idx, record in enumerate(records, start=1):
+    materialised: List[Any] = list(records)
+
+    for i, sample in enumerate(materialised[:3], start=1):
+        print(f"🔍 Record {i} type before upload: {type(sample).__name__}")
+
+    for idx, raw_record in enumerate(materialised, start=1):
+        record = _coerce_record(raw_record)
         if not isinstance(record, Mapping):
             print(f"⚠️ Skipping record #{idx}: payload is not a dict.")
             continue
 
         property_payload = {
-            "Property Address": record.get("full_address"),
-            "Owner Name": record.get("owner_name"),
-            "Status": record.get("status"),
-            "Estimated Value": record.get("est_value"),
+            "Property Address": record.get("Property Address") or record.get("full_address"),
+            "Owner Name": record.get("Owner Name") or record.get("owner_name"),
+            "Status": record.get("Status") or record.get("status"),
+            "Estimated Value": record.get("Estimated Value") or record.get("est_value"),
         }
         clean_property = clean_fields(property_payload, PROPERTY_TABLE["valid_fields"])
 
         seller_payload = {
-            "Owner Name": record.get("owner_name"),
+            "Owner Name": record.get("Owner Name") or record.get("owner_name"),
         }
         clean_seller = clean_fields(seller_payload, SELLER_TABLE["valid_fields"])
 
