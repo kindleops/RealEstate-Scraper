@@ -47,6 +47,27 @@ OVERLAY_LOCATORS: List[str] = [
     "//div[contains(@class,'ReactModal__Overlay')]",
 ]
 
+FILTER_TOGGLE_LOCATORS: List[str] = [
+    "//button[contains(@class,'quick-filter')]",
+    "//button[contains(@class,'filters')]",
+    "//button[contains(.,'Filters')]",
+    "//button[contains(.,'Quick Filters')]",
+]
+
+FILTER_CONTAINER_LOCATORS: List[str] = [
+    "//div[contains(@class,'quick-filters') and not(contains(@style,'display: none'))]",
+    "//div[contains(@class,'filters-panel') and not(contains(@style,'display: none'))]",
+    "//div[contains(@class,'modal')]//div[contains(@class,'filters') and contains(@class,'open')]",
+    "//div[contains(@class,'ReactModal__Content')]//div[contains(@class,'filters')]",
+]
+
+OVERLAY_BLOCKERS: List[str] = [
+    ".ReactModal__Overlay",
+    ".deal-overlay",
+    ".mapboxgl-canvas",
+    ".mapboxgl-control-container",
+]
+
 
 def apply_niche_filters(
     driver,
@@ -54,24 +75,40 @@ def apply_niche_filters(
     pause: float = 1.2,
 ) -> None:
     """
-    Apply a sequence of DealMachine quick filters.
+    Apply a sequence of DealMachine quick filters, probing multiple containers.
     """
 
-    filters = list(filters or DEFAULT_FILTERS)
-    if not filters:
+    labels = list(filters or DEFAULT_FILTERS)
+    if not labels:
         return
 
     print("🧭 Applying quick filters...")
-    for label in filters:
+    _dismiss_screen_overlays(driver)
+
+    container = _locate_filter_container(driver)
+    if container is None:
+        _toggle_filters_panel(driver)
+        container = _locate_filter_container(driver, timeout=8)
+
+    for label in labels:
+        if container is None or not container.is_displayed():
+            container = _locate_filter_container(driver, timeout=4)
+            if container is None:
+                print(f"⚠️ Filter container unavailable for '{label}'.")
+                continue
+
         try:
-            button = WebDriverWait(driver, 6).until(
-                EC.element_to_be_clickable((By.XPATH, f"//button[contains(., '{label}')]"))
-            )
+            button = _find_filter_button(container, label)
+            if button is None:
+                print(f"⚠️ Filter not found: {label}")
+                continue
+
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", button)
             driver.execute_script("arguments[0].click();", button)
             print(f"✅ Applied filter: {label}")
             time.sleep(pause)
-        except TimeoutException:
-            print(f"⚠️ Filter not found: {label}")
+        except StaleElementReferenceException:
+            container = None
         except Exception as exc:  # pragma: no cover - defensive
             print(f"⚠️ Error applying filter '{label}': {exc}")
 
@@ -81,6 +118,73 @@ def _safe_json_preview(record: Dict[str, Any]) -> str:
         return json.dumps(record, indent=2, default=str)
     except TypeError:
         return str(record)
+
+
+def _dismiss_screen_overlays(driver) -> List[str]:
+    script = """
+    const selectors = arguments[0];
+    const handled = [];
+    selectors.forEach((sel) => {
+        document.querySelectorAll(sel).forEach((el) => {
+            const style = window.getComputedStyle(el);
+            if (!style) return;
+            const pointer = style.pointerEvents;
+            if (pointer && pointer !== 'none') {
+                el.dataset.__seleniumPointerEvents = pointer;
+                el.style.pointerEvents = 'none';
+                handled.push(sel);
+            }
+        });
+    });
+    return handled;
+    """
+    try:
+        return driver.execute_script(script, OVERLAY_BLOCKERS) or []
+    except Exception:
+        return []
+
+
+def _locate_filter_container(driver, timeout: float = 5.0):
+    for locator in FILTER_CONTAINER_LOCATORS:
+        try:
+            container = WebDriverWait(driver, timeout).until(
+                EC.presence_of_element_located((By.XPATH, locator))
+            )
+            if container and container.is_displayed():
+                return container
+        except TimeoutException:
+            continue
+        except Exception:
+            continue
+    return None
+
+
+def _toggle_filters_panel(driver) -> None:
+    for locator in FILTER_TOGGLE_LOCATORS:
+        try:
+            button = driver.find_element(By.XPATH, locator)
+            if button.is_displayed():
+                driver.execute_script("arguments[0].click();", button)
+                time.sleep(0.6)
+                return
+        except (NoSuchElementException, StaleElementReferenceException):
+            continue
+
+
+def _find_filter_button(container, label: str):
+    normalized = label.strip().lower()
+    xpaths = [
+        f".//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{normalized}')]",
+        f".//div[contains(@role,'option') and contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{normalized}')]",
+    ]
+    for xpath in xpaths:
+        try:
+            button = container.find_element(By.XPATH, xpath)
+            if button.is_displayed():
+                return button
+        except NoSuchElementException:
+            continue
+    return None
 
 
 def _wait_for_modal(driver, timeout: float = 10.0):
@@ -189,6 +293,9 @@ def _deep_scrape_card(
     while attempts < 2:
         attempts += 1
         try:
+            handled = _dismiss_screen_overlays(driver)
+            if handled and attempts == 1:
+                print(f"ℹ️ Suppressed overlay layers: {', '.join(sorted(set(handled)))}")
             driver.execute_script(
                 "arguments[0].scrollIntoView({block:'center', inline:'center'});",
                 card,
