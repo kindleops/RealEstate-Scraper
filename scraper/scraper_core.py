@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import csv
 import json
+import random
 import time
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from selenium.common.exceptions import (
+    InvalidSessionIdException,
     NoSuchElementException,
     StaleElementReferenceException,
     TimeoutException,
@@ -287,42 +291,133 @@ def _deep_scrape_card(
     address: str,
     modal_timeouts: int,
 ) -> Tuple[Dict[str, str], int]:
-    attempts = 0
     layered: Dict[str, str] = {}
 
-    while attempts < 2:
-        attempts += 1
+    max_attempts = 2
+    for attempt in range(1, max_attempts + 1):
         try:
             handled = _dismiss_screen_overlays(driver)
-            if handled and attempts == 1:
+            if handled and attempt == 1:
                 print(f"ℹ️ Suppressed overlay layers: {', '.join(sorted(set(handled)))}")
+
             driver.execute_script(
                 "arguments[0].scrollIntoView({block:'center', inline:'center'});",
                 card,
             )
-            WebDriverWait(driver, 6).until(lambda d: card.is_displayed())
+            WebDriverWait(driver, 10).until(lambda d: card.is_displayed())
+
             try:
                 card.click()
             except Exception:
                 driver.execute_script("arguments[0].click();", card)
 
-            layered = _scrape_modal(driver)
+            modal_root, locator_hint = _wait_for_modal(driver)
+
+            field_map = {
+                "Property Address": [
+                    ".//span[contains(@class,'address')]",
+                    ".//div[contains(@class,'address')]",
+                    ".//h1[contains(@class,'address')]",
+                ],
+                "Owner Name": [
+                    ".//span[contains(@class,'owner')]",
+                    ".//div[contains(@class,'owner')]",
+                    ".//h2[contains(@class,'owner')]",
+                ],
+                "Mailing Address": [
+                    ".//span[contains(text(),'Mailing')]/following-sibling::*[1]",
+                    ".//div[contains(text(),'Mailing Address')]/following-sibling::*[1]",
+                ],
+                "Property Type": [
+                    ".//span[contains(text(),'Property Type')]/following-sibling::*[1]",
+                    ".//div[contains(text(),'Property Type')]/following-sibling::*[1]",
+                ],
+                "Estimated Value": [
+                    ".//span[contains(text(),'Est') or contains(text(),'Value')]/following-sibling::*[1]",
+                    ".//div[contains(@class,'value') and contains(text(),'$')]",
+                ],
+                "Equity %": [
+                    ".//span[contains(text(),'Equity')]",
+                    ".//div[contains(text(),'Equity')]",
+                ],
+                "Beds/Baths": [
+                    ".//span[contains(text(),'Beds') or contains(text(),'Baths')]/../*",
+                ],
+                "Sale Date / Year Built": [
+                    ".//span[contains(text(),'Sale') or contains(text(),'Built')]/following-sibling::*[1]",
+                    ".//div[contains(text(),'Sale Date') or contains(text(),'Year Built')]/following-sibling::*[1]",
+                ],
+            }
+
+            def first_non_empty(paths: List[str]) -> str:
+                for path in paths:
+                    elements = modal_root.find_elements(By.XPATH, path)
+                    for element in elements:
+                        text = element.text.strip()
+                        if text:
+                            return text
+                return ""
+
+            for key, paths in field_map.items():
+                value = first_non_empty(paths)
+                if value:
+                    layered[key] = value
+
+            tag_elements = modal_root.find_elements(
+                By.XPATH,
+                ".//*[contains(@class,'chip') or contains(@class,'badge') or contains(@class,'tag')]",
+            )
+            tags = {tag.text.strip() for tag in tag_elements if tag.text.strip()}
+            if tags:
+                layered["Vacancy / Absentee Tags"] = ", ".join(sorted(tags))
+
+            print(f"✅ Modal scraped for {address} (attempt {attempt})")
+            _close_modal(driver, locator_hint)
+            WebDriverWait(driver, 5).until(
+                EC.invisibility_of_element_located((By.XPATH, locator_hint))
+            )
             break
 
         except TimeoutException:
             modal_timeouts += 1
-            if modal_timeouts <= 3 or modal_timeouts % 5 == 0:
-                print(f"⚠️ Modal timeout for {address} (#{modal_timeouts})")
+            print(f"⚠️ Modal timeout for {address} (attempt {attempt}, total {modal_timeouts})")
             _force_close_modal(driver)
+            if modal_timeouts % 5 == 0:
+                print("↻ Refreshing page after repeated timeouts.")
+                driver.refresh()
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_element_located((By.XPATH, PROPERTY_CARD_SELECTOR))
+                )
 
-        except StaleElementReferenceException:
+        except InvalidSessionIdException:
             _force_close_modal(driver)
             raise
 
-        except Exception as exc:
-            print(f"⚠️ Deep scrape error on {address}: {exc}")
+        except StaleElementReferenceException:
+            print(f"⚠️ Modal DOM went stale for {address}; retrying.")
             _force_close_modal(driver)
-            break
+            if attempt == 2:
+                layered = {}
+            continue
+
+        except Exception as exc:
+            print(f"⚠️ Modal scrape error for {address}: {exc}")
+            _force_close_modal(driver)
+            if attempt == 2:
+                layered = {}
+            else:
+                try:
+                    driver.refresh()
+                    WebDriverWait(driver, 20).until(
+                        EC.presence_of_element_located((By.XPATH, PROPERTY_CARD_SELECTOR))
+                    )
+                except Exception:
+                    pass
+
+        finally:
+            time.sleep(random.uniform(0.3, 0.7))
+    else:
+        print(f"⚠️ Skipping modal for {address} after {max_attempts} attempts.")
 
     return layered, modal_timeouts
 
@@ -333,127 +428,216 @@ def scroll_and_scrape_properties(
     wait_time: float = 1.4,
     deep_scrape: bool = True,
     auto_filters: bool = True,
+    modal_limit: int = 40,
+    restart_callback=None,
+    save_path: str = "data/scraped_properties.json",
+    auto_quit: bool = False,
 ) -> List[Dict[str, Any]]:
-    """
-    Scroll through DealMachine property cards and return Airtable-ready dictionaries.
-    """
+    """Robust DealMachine scraper with modal handling, batching, and persistence."""
 
     print("🚀 Starting advanced property scraping sequence...")
     properties: List[Dict[str, Any]] = []
-
-    if auto_filters:
-        apply_niche_filters(driver)
-
-    try:
-        WebDriverWait(driver, 25).until(
-            EC.presence_of_element_located((By.XPATH, PROPERTY_CARD_SELECTOR))
-        )
-        print("✅ Property cards detected.")
-    except TimeoutException:
-        print("⚠️ No property cards found — aborting scrape.")
-        return []
-
     modal_timeouts = 0
-    last_count = 0
+    modal_scraped = 0
+    refresh_every = 50
+    restart_attempts = 0
+    output_path = Path(save_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    for scroll_index in range(max_scrolls):
-        cards_snapshot = driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR)
-        print(f"📍 Found {len(cards_snapshot)} cards after scroll {scroll_index + 1}")
+    def _persist_batch(records: List[Dict[str, Any]]) -> None:
+        if not records:
+            return
+        if output_path.suffix.lower() == ".csv":
+            fieldnames = sorted({key for rec in records for key in rec.keys()})
+            with output_path.open("w", newline="", encoding="utf-8") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(records)
+        else:
+            output_path.write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
 
-        position = 0
-        stale_retries = 0
+    def _post_refresh() -> None:
+        WebDriverWait(driver, 20).until(
+            EC.visibility_of_element_located((By.XPATH, PROPERTY_CARD_SELECTOR))
+        )
+        if auto_filters:
+            apply_niche_filters(driver)
 
-        while True:
-            current_cards = driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR)
-            if position >= len(current_cards):
-                break
-
-            card = current_cards[position]
+    session_active = True
+    try:
+        while session_active:
             try:
-                card_text = card.text.strip()
-                if not card_text:
-                    position += 1
-                    continue
+                if auto_filters:
+                    apply_niche_filters(driver)
 
-                lines = [ln.strip() for ln in card_text.split("\n") if ln.strip()]
-                if not lines:
-                    position += 1
-                    continue
+                WebDriverWait(driver, 25).until(
+                    EC.visibility_of_element_located((By.XPATH, PROPERTY_CARD_SELECTOR))
+                )
+                print("✅ Property cards detected.")
 
-                address = _extract_address(lines, card)
-                if not address:
-                    position += 1
-                    continue
+                last_count = 0
+                modal_timeouts = 0
+                modal_scraped = 0
 
-                owner = _extract_owner(lines)
-                value = _extract_value(lines)
-                tags = _extract_tags(lines, card)
+                for scroll_index in range(max_scrolls):
+                    cards_snapshot = driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR)
+                    print(f"📍 Found {len(cards_snapshot)} cards after scroll {scroll_index + 1}")
 
-                record: Dict[str, Any] = {
-                    "Property Address": address.strip(),
-                    "Owner Name": (owner or "Unknown").strip(),
-                    "Estimated Value": value.strip() if value else "",
-                    "Status": ", ".join(tags) if tags else "",
-                    "Equity %": "",
-                    "Mailing Address": "",
-                    "Last Sale Date": "",
-                    "Last Sale Price": "",
-                }
+                    position = 0
+                    stale_retries = 0
 
-                if deep_scrape:
-                    try:
-                        layered, modal_timeouts = _deep_scrape_card(
-                            driver, card, address, modal_timeouts
-                        )
-                        if layered:
-                            record.update({key: layered.get(key, record[key]) for key in layered})
-                    except StaleElementReferenceException:
-                        stale_retries += 1
-                        if stale_retries > 2:
-                            print(f"⚠️ Repeated DOM updates on card #{position + 1}; skipping.")
+                    while True:
+                        current_cards = driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR)
+                        if position >= len(current_cards):
+                            break
+
+                        card = current_cards[position]
+                        try:
+                            WebDriverWait(driver, 10).until(lambda d, c=card: c.is_displayed())
+                            card_text = card.text.strip()
+                            if not card_text:
+                                position += 1
+                                continue
+
+                            lines = [ln.strip() for ln in card_text.split("\n") if ln.strip()]
+                            if not lines:
+                                position += 1
+                                continue
+
+                            address = _extract_address(lines, card)
+                            if not address:
+                                position += 1
+                                continue
+
+                            owner = _extract_owner(lines)
+                            value = _extract_value(lines)
+                            tags = _extract_tags(lines, card)
+
+                            record: Dict[str, Any] = {
+                                "Property Address": address.strip(),
+                                "Owner Name": (owner or "Unknown").strip(),
+                                "Estimated Value": value.strip() if value else "",
+                                "Status": ", ".join(tags) if tags else "",
+                                "Equity %": "",
+                                "Mailing Address": "",
+                                "Last Sale Date": "",
+                                "Last Sale Price": "",
+                                "Property Type": "",
+                                "Beds/Baths": "",
+                                "Sale Date / Year Built": "",
+                                "Vacancy / Absentee Tags": "",
+                            }
+
+                            if deep_scrape and modal_scraped < modal_limit:
+                                layered, modal_timeouts = _deep_scrape_card(
+                                    driver, card, address, modal_timeouts
+                                )
+                                modal_scraped += 1
+                                if layered:
+                                    record.update({key: layered.get(key, record.get(key, "")) for key in layered})
+                            elif deep_scrape and modal_scraped >= modal_limit:
+                                print(f"ℹ️ Modal limit ({modal_limit}) reached; continuing without deep scrape.")
+
+                            properties.append(record)
+
+                            if len(properties) % refresh_every == 0:
+                                print("🔄 Refresh threshold reached — refreshing page and reapplying filters.")
+                                driver.refresh()
+                                _post_refresh()
+
                             position += 1
                             stale_retries = 0
-                        else:
-                            time.sleep(0.3)
-                        continue
 
-                properties.append(record)
-                position += 1
-                stale_retries = 0
+                        except StaleElementReferenceException:
+                            stale_retries += 1
+                            if stale_retries > 2:
+                                print(f"⚠️ Repeated DOM updates on card #{position + 1}; skipping.")
+                                position += 1
+                                stale_retries = 0
+                            else:
+                                WebDriverWait(driver, 3).until(lambda _: True)
+                            continue
+                        except TimeoutException:
+                            print(f"⚠️ Card #{position + 1} timed out; moving on.")
+                            position += 1
+                            continue
+                        except InvalidSessionIdException:
+                            raise
+                        except Exception as exc:
+                            print(f"⚠️ Unexpected card parsing error: {exc}")
+                            position += 1
+                            continue
 
-            except StaleElementReferenceException:
-                stale_retries += 1
-                if stale_retries > 2:
-                    print(f"⚠️ Repeated DOM updates on card #{position + 1}; skipping.")
-                    position += 1
-                    stale_retries = 0
-                else:
-                    time.sleep(0.3)
+                    driver.execute_script(
+                        "const sidebar=document.querySelector('.deal-scroll');"
+                        "if(sidebar){sidebar.scrollBy(0, sidebar.scrollHeight);}" 
+                    )
+                    try:
+                        WebDriverWait(driver, wait_time).until(
+                            lambda d, count=len(cards_snapshot): len(d.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR)) > count
+                        )
+                    except TimeoutException:
+                        pass
+
+                    current_total = len(driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR))
+                    if current_total == last_count:
+                        print("🔚 Reached end of property list.")
+                        break
+                    last_count = current_total
+
+                break
+
+            except InvalidSessionIdException:
+                print("⚠️ Session crashed — restarting driver…")
+                restart_attempts += 1
+                if restart_attempts > 3 or not restart_callback:
+                    print("❌ Unable to recover from InvalidSessionIdException.")
+                    break
+
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
+                driver = restart_callback()
+                print("✅ Driver restart successful, resuming scrape…")
                 continue
-            except NoSuchElementException:
-                position += 1
-                continue
 
-        driver.execute_script(
-            "const sidebar=document.querySelector('.deal-scroll');"
-            "if(sidebar){sidebar.scrollBy(0, sidebar.scrollHeight);}"
-        )
-        time.sleep(wait_time)
+            except TimeoutException as exc:
+                print(f"⚠️ Timeout encountered ({exc}). Attempting recovery via refresh.")
+                try:
+                    driver.refresh()
+                    _post_refresh()
+                except InvalidSessionIdException:
+                    continue
+                except Exception as recovery_exc:
+                    print(f"⚠️ Refresh recovery failed: {recovery_exc}")
+                    break
 
-        current_total = len(driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR))
-        if current_total == last_count:
-            print("🔚 Reached end of property list.")
-            break
-        last_count = current_total
+            except Exception as exc:
+                print(f"⚠️ Unexpected scraper error: {exc}")
+                try:
+                    driver.refresh()
+                    _post_refresh()
+                except Exception:
+                    pass
+                break
 
-    cleaned = [p for p in properties if isinstance(p, dict) and any(p.values())]
-    print(f"✅ Scraped {len(cleaned)} property records.")
-    if cleaned:
-        print(f"🧠 Sample record:\n{_safe_json_preview(cleaned[0])}")
-    else:
-        print("⚠️ No valid property data scraped.")
+        cleaned = [p for p in properties if isinstance(p, dict) and any(p.values())]
+        print(f"✅ Scraped {len(cleaned)} property records.")
+        if cleaned:
+            print(f"🧠 Sample record:\n{_safe_json_preview(cleaned[0])}")
+        else:
+            print("⚠️ No valid property data scraped.")
+        return cleaned
 
-    return cleaned
+    finally:
+        _persist_batch(properties)
+        if auto_quit:
+            try:
+                driver.quit()
+            except Exception:
+                pass
 
 
 def _extract_address(lines: List[str], card) -> str:
