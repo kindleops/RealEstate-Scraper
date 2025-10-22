@@ -41,34 +41,14 @@ def main():
                 print(f"[!] No properties found in ZIP {zip_code}")
                 continue
 
-            # 5️⃣ Upload each property to Airtable
-            for i, prop_data in enumerate(property_cards, start=1):
-                print(f"\n--- Uploading Property #{i}: {prop_data.get('address')} ---")
-
-                fake_record = {
-                    "property": {
-                        "full_address": prop_data.get("address"),
-                        "seller_name": prop_data.get("owner_name"),
-                        "estimated_value": prop_data.get("estimated_value"),
-                    },
-                    "seller": {},
-                    "mortgage": [],
-                    "company": {},
-                    "company_contacts": [],
-                    "phones": [],
-                    "emails": [],
-                    "aod": [],
-                    "probate": [],
-                    "liens": [],
-                    "foreclosures": []
-                }
-
-                try:
-                    route_and_upload(fake_record)
-                except Exception as e:
-                    print(f"⚠️ Upload failed: {e}")
-
-            print(f"[✓] Completed ZIP: {zip_code} — {len(property_cards)} properties uploaded")
+            # 5️⃣ Upload scraped properties to Airtable
+            try:
+                summary = route_and_upload(property_cards)
+                print(
+                    f"[✓] Completed ZIP: {zip_code} — Uploaded {summary['uploaded']} / {summary['total']}"
+                )
+            except Exception as e:
+                print(f"⚠️ Upload failed for ZIP {zip_code}: {e}")
 
     finally:
         driver.quit()
