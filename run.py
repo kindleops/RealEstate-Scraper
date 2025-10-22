@@ -35,7 +35,7 @@ def main():
             apply_quick_filters(driver, filters=["Vacant", "High Equity"])
 
             # 4️⃣ Scrape all sidebar property cards
-            property_cards = scroll_and_scrape_properties(driver)
+            property_cards = scroll_and_scrape_properties(driver, source_zip=zip_code)
 
             if not property_cards:
                 print(f"[!] No properties found in ZIP {zip_code}")

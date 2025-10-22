@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import random
+import re
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -31,9 +32,17 @@ PROPERTY_CARD_SELECTOR = (
     "//div[contains(@class,'deal-scroll')]"
     "//div[contains(@class,'deal-wrapper') or contains(@class,'property-card')]"
 )
+CARD_CSS_SELECTORS: List[str] = [
+    "div[data-testid='property-card']",
+    "div.property-card",
+    "div.card-property",
+]
+CARD_FALLBACK_XPATH = "//div[contains(@class,'property-card') or contains(., 'Est. Value')]"
+
 PROPERTY_MODAL_SELECTOR = "//div[contains(@class,'property-details')]"
 MODAL_LOCATORS: List[str] = [
     PROPERTY_MODAL_SELECTOR,
+    "//div[@data-testid='property-modal']",
     "//div[contains(@class,'ReactModal__Content')]",
     "//div[contains(@class,'modal') and contains(@class,'open')]",
     "//div[contains(@role,'dialog') and (.//h1 or .//h2)]",
@@ -71,6 +80,8 @@ OVERLAY_BLOCKERS: List[str] = [
     ".mapboxgl-canvas",
     ".mapboxgl-control-container",
 ]
+
+ADDRESS_REGEX = re.compile(r"\d{3,5}\s+\w")
 
 
 def apply_niche_filters(
@@ -191,6 +202,17 @@ def _find_filter_button(container, label: str):
     return None
 
 
+def _wait_for_filters_closed(driver, timeout: float = 10.0) -> None:
+    if "Quick Filters" not in driver.page_source:
+        return
+    try:
+        WebDriverWait(driver, timeout).until_not(
+            EC.presence_of_element_located((By.XPATH, "//div[contains(text(),'Quick Filters')]") )
+        )
+    except TimeoutException:
+        pass
+
+
 def _wait_for_modal(driver, timeout: float = 10.0):
     last_error: Optional[Exception] = None
     for locator in MODAL_LOCATORS:
@@ -202,6 +224,16 @@ def _wait_for_modal(driver, timeout: float = 10.0):
         except TimeoutException as exc:
             last_error = exc
     raise last_error or TimeoutException("Property modal not found")
+
+
+def _get_property_cards(driver) -> List[Any]:
+    for selector in CARD_CSS_SELECTORS:
+        cards = driver.find_elements(By.CSS_SELECTOR, selector)
+        cards = [card for card in cards if card.is_displayed()]
+        if cards:
+            return cards
+    cards = driver.find_elements(By.XPATH, CARD_FALLBACK_XPATH)
+    return [card for card in cards if card.is_displayed()]
 
 
 def _close_modal(driver, locator_hint: Optional[str] = None, timeout: float = 5.0) -> None:
@@ -255,36 +287,6 @@ def _force_close_modal(driver) -> None:
             continue
 
 
-def _scrape_modal(driver) -> Dict[str, str]:
-    """Scrape additional details from the property modal."""
-
-    element, locator_hint = _wait_for_modal(driver)
-    raw_text = element.text or element.get_attribute("innerText") or ""
-    lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
-
-    layered: Dict[str, str] = {
-        "Equity %": "",
-        "Mailing Address": "",
-        "Last Sale Date": "",
-        "Last Sale Price": "",
-    }
-
-    for line in lines:
-        lower = line.lower()
-        if "equity" in lower and "%" in line:
-            layered["Equity %"] = line
-        elif "mailing" in lower or ("address" in lower and "," in line):
-            layered["Mailing Address"] = line
-        elif any(keyword in lower for keyword in ("sold", "sale", "purchased")):
-            if "$" in line:
-                layered["Last Sale Price"] = line
-            else:
-                layered["Last Sale Date"] = line
-
-    _close_modal(driver, locator_hint)
-    return layered
-
-
 def _deep_scrape_card(
     driver,
     card,
@@ -296,6 +298,7 @@ def _deep_scrape_card(
     max_attempts = 2
     for attempt in range(1, max_attempts + 1):
         try:
+            _wait_for_filters_closed(driver, timeout=5)
             handled = _dismiss_screen_overlays(driver)
             if handled and attempt == 1:
                 print(f"ℹ️ Suppressed overlay layers: {', '.join(sorted(set(handled)))}")
@@ -340,12 +343,16 @@ def _deep_scrape_card(
                     ".//span[contains(text(),'Equity')]",
                     ".//div[contains(text(),'Equity')]",
                 ],
-                "Beds/Baths": [
+                "Beds / Baths": [
                     ".//span[contains(text(),'Beds') or contains(text(),'Baths')]/../*",
                 ],
                 "Sale Date / Year Built": [
                     ".//span[contains(text(),'Sale') or contains(text(),'Built')]/following-sibling::*[1]",
                     ".//div[contains(text(),'Sale Date') or contains(text(),'Year Built')]/following-sibling::*[1]",
+                ],
+                "Year Built": [
+                    ".//span[contains(text(),'Year Built')]/following-sibling::*[1]",
+                    ".//div[contains(text(),'Year Built')]/following-sibling::*[1]",
                 ],
             }
 
@@ -432,6 +439,7 @@ def scroll_and_scrape_properties(
     restart_callback=None,
     save_path: str = "data/scraped_properties.json",
     auto_quit: bool = False,
+    source_zip: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Robust DealMachine scraper with modal handling, batching, and persistence."""
 
@@ -457,9 +465,7 @@ def scroll_and_scrape_properties(
             output_path.write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
 
     def _post_refresh() -> None:
-        WebDriverWait(driver, 20).until(
-            EC.visibility_of_element_located((By.XPATH, PROPERTY_CARD_SELECTOR))
-        )
+        WebDriverWait(driver, 20).until(lambda d: len(_get_property_cards(d)) > 0)
         if auto_filters:
             apply_niche_filters(driver)
 
@@ -470,9 +476,7 @@ def scroll_and_scrape_properties(
                 if auto_filters:
                     apply_niche_filters(driver)
 
-                WebDriverWait(driver, 25).until(
-                    EC.visibility_of_element_located((By.XPATH, PROPERTY_CARD_SELECTOR))
-                )
+                WebDriverWait(driver, 25).until(lambda d: len(_get_property_cards(d)) > 0)
                 print("✅ Property cards detected.")
 
                 last_count = 0
@@ -480,14 +484,23 @@ def scroll_and_scrape_properties(
                 modal_scraped = 0
 
                 for scroll_index in range(max_scrolls):
-                    cards_snapshot = driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR)
+                    _wait_for_filters_closed(driver)
+                    cards_snapshot = _get_property_cards(driver)
                     print(f"📍 Found {len(cards_snapshot)} cards after scroll {scroll_index + 1}")
+
+                    if not cards_snapshot:
+                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        try:
+                            WebDriverWait(driver, 5).until(lambda d: len(_get_property_cards(d)) > 0)
+                        except TimeoutException:
+                            pass
+                        continue
 
                     position = 0
                     stale_retries = 0
 
                     while True:
-                        current_cards = driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR)
+                        current_cards = _get_property_cards(driver)
                         if position >= len(current_cards):
                             break
 
@@ -523,9 +536,11 @@ def scroll_and_scrape_properties(
                                 "Last Sale Date": "",
                                 "Last Sale Price": "",
                                 "Property Type": "",
-                                "Beds/Baths": "",
+                                "Beds / Baths": "",
                                 "Sale Date / Year Built": "",
                                 "Vacancy / Absentee Tags": "",
+                                "Year Built": "",
+                                "Source ZIP": source_zip or "",
                             }
 
                             if deep_scrape and modal_scraped < modal_limit:
@@ -537,6 +552,12 @@ def scroll_and_scrape_properties(
                                     record.update({key: layered.get(key, record.get(key, "")) for key in layered})
                             elif deep_scrape and modal_scraped >= modal_limit:
                                 print(f"ℹ️ Modal limit ({modal_limit}) reached; continuing without deep scrape.")
+
+                            if not ADDRESS_REGEX.search(record["Property Address"]):
+                                print(f"⚠️ Skipping invalid address: {record['Property Address']}")
+                                position += 1
+                                stale_retries = 0
+                                continue
 
                             properties.append(record)
 
@@ -574,12 +595,12 @@ def scroll_and_scrape_properties(
                     )
                     try:
                         WebDriverWait(driver, wait_time).until(
-                            lambda d, count=len(cards_snapshot): len(d.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR)) > count
+                            lambda d, count=len(cards_snapshot): len(_get_property_cards(d)) > count
                         )
                     except TimeoutException:
                         pass
 
-                    current_total = len(driver.find_elements(By.XPATH, PROPERTY_CARD_SELECTOR))
+                    current_total = len(_get_property_cards(driver))
                     if current_total == last_count:
                         print("🔚 Reached end of property list.")
                         break
@@ -642,16 +663,14 @@ def scroll_and_scrape_properties(
 
 def _extract_address(lines: List[str], card) -> str:
     for line in lines:
-        lower = line.lower()
-        if ("," in line and any(state in lower for state in ("fl", "tx", "ca", "ny", "az", "nv", "il"))) or any(
-            token in lower for token in (" st", " ave", " rd", " blvd", " ln", " dr", " ct", " cir")
-        ):
+        if ADDRESS_REGEX.search(line):
             return line
     try:
-        return (
+        text = (
             card.find_element(By.XPATH, ".//*[contains(@class,'address') or contains(text(), ', ')]")
             .text.strip()
         )
+        return text if ADDRESS_REGEX.search(text) else ""
     except NoSuchElementException:
         return ""
 
