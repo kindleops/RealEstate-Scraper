@@ -3,7 +3,7 @@ import requests
 import sys
 import json
 from dotenv import load_dotenv
-from .field_mapping import (
+from .mappings import (
     PROPERTY_FIELDS, SELLER_FIELDS, MORTGAGE_FIELDS, COMPANY_FIELDS,
     COMPANY_CONTACT_FIELDS, PHONE_FIELDS, EMAIL_FIELDS, AOD_FIELDS,
     PROBATE_FIELDS, LIEN_FIELDS, FORECLOSURE_FIELDS

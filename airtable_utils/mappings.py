@@ -271,3 +271,18 @@ FORECLOSURE_FIELDS = [
     "Trustee Phone Number",
     "Trustee Case Number",
 ]
+# Export all field groups for cleaner imports
+__all__ = [
+    "to_title_case",
+    "PROPERTY_FIELDS",
+    "SELLER_FIELDS",
+    "MORTGAGE_FIELDS",
+    "COMPANY_FIELDS",
+    "COMPANY_CONTACT_FIELDS",
+    "PHONE_FIELDS",
+    "EMAIL_FIELDS",
+    "AOD_FIELDS",
+    "PROBATE_FIELDS",
+    "LIEN_FIELDS",
+    "FORECLOSURE_FIELDS",
+]

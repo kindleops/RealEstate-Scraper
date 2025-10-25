@@ -1,7 +1,7 @@
 import os
 import requests
 import sys
-from .field_mapping import PROPERTY_FIELDS, SELLER_FIELDS
+from .mappings import PROPERTY_FIELDS, SELLER_FIELDS
 
 # Get environment variables with proper error handling
 AIRTABLE_API_KEY = os.getenv("AIRTABLE_API_KEY")

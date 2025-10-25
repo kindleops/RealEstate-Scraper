@@ -13,8 +13,9 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+from airtable_utils.mappings import PROPERTY_FIELDS
 
-from airtable_utils.router import route_and_upload
+from airtable_utils.router import route_and_upload, batch_upload
 
 from selenium.common.exceptions import (
     InvalidSessionIdException,
@@ -373,6 +374,8 @@ def scroll_and_scrape_properties(
     Adaptive scrolling + deduplication for massive property extraction.
     """
 
+    from airtable_utils.router import batch_upload  # <-- unified router integration
+
     print("🚀 [High-Yield Mode] Starting extended property scraping sequence...")
     properties: List[Dict[str, Any]] = []
     seen_addresses = set()
@@ -422,7 +425,7 @@ def scroll_and_scrape_properties(
                     tags = _extract_tags(lines, card)
 
                     # Skip duplicates
-                    if address in seen_addresses:
+                    if not address or address in seen_addresses:
                         continue
                     seen_addresses.add(address)
 
@@ -454,11 +457,15 @@ def scroll_and_scrape_properties(
             )
             time.sleep(wait_time)
 
+        # --- POST-SCRAPE PHASE ---
         cleaned = [p for p in properties if isinstance(p, dict) and any(p.values())]
         print(f"✅ [High-Yield] Scraped {len(cleaned)} unique property records.")
         if cleaned:
             print(f"🧠 Sample record:\n{json.dumps(cleaned[0], indent=2)}")
-            upload_all_properties(cleaned)
+
+            # ✅ Upload all to Airtable via the unified router
+            print("📦 Uploading scraped properties to Airtable...")
+            batch_upload(cleaned)  # auto-routes to correct bases
         else:
             print("⚠️ No valid property data scraped.")
 
