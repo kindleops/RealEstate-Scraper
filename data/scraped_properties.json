@@ -1,16 +1,18 @@
 [
   {
-    "Property Address": "Out of State Owners",
-    "Owner Name": "Unknown",
+    "Property Address": "200 Applewood Ln, Haslet, Tx 76052 Open Property",
+    "Owner Name": "Dashboard",
     "Estimated Value": "",
-    "Status": "",
+    "Status": "Leads, Manually Add Lead, Lead",
     "Equity %": "",
     "Mailing Address": "",
     "Last Sale Date": "",
     "Last Sale Price": "",
     "Property Type": "",
-    "Beds/Baths": "",
+    "Beds / Baths": "",
     "Sale Date / Year Built": "",
-    "Vacancy / Absentee Tags": ""
+    "Vacancy / Absentee Tags": "",
+    "Year Built": "",
+    "Source ZIP": "33054"
   }
 ]
