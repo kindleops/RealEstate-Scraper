@@ -21,7 +21,7 @@ def to_title_case(field: str) -> str:
 
 # PROPERTY TABLE
 PROPERTY_FIELDS = [
-    "Full Address",
+    "Property Address",
     "Street Address",
     "Property City",
     "Seller Name",

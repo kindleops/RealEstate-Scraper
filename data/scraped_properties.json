@@ -1,18 +1,184 @@
 [
   {
-    "Property Address": "200 Applewood Ln, Haslet, Tx 76052 Open Property",
+    "Property Address": "3274 Nw 100th St, Miami, FL 33147",
     "Owner Name": "Dashboard",
-    "Estimated Value": "",
-    "Status": "Leads, Manually Add Lead, Lead",
-    "Equity %": "",
-    "Mailing Address": "",
-    "Last Sale Date": "",
-    "Last Sale Price": "",
-    "Property Type": "",
-    "Beds / Baths": "",
-    "Sale Date / Year Built": "",
-    "Vacancy / Absentee Tags": "",
-    "Year Built": "",
-    "Source ZIP": "33054"
+    "Estimated Value": "$563,000",
+    "Status": "Leads, Lead, High Equity, High Equity, Absentee Owner, Add Lead, Absentee Owner, Vacant Home",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "1437 Nw 70th St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$360,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "3515 Nw 98th St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$474,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "1244 Nw 68th Ter, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$370,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "2302 Nw 82nd St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$620,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "1726 Nw 63rd St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$440,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "8832 Nw 22nd Pl, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$287,000",
+    "Status": "High Equity",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "8523 Nw 22nd Ave, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$310,449",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "7930 Nw 14th Ave, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$500,000",
+    "Status": "High Equity",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "8180 Nw 13th Ave, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$383,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "9231 Nw 33rd Avenue Rd, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$535,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "1226 Nw 103rd St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$408,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "2260 Nw 86th Ter, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$411,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "3400 Nw 67th St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$7,864,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "2081 Nw 104th St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$466,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "7645 Nw 16th Ave, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$501,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "10340 Nw 29th Ave, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$706,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "1556 Nw 68th Ter, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$461,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "2040 Nw 97th St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$351,000",
+    "Status": "Absentee Owner",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "1361 Nw 98th Ter, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$554,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "3242 Nw 87th Ter, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$520,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "7000 Nw 21st Ave, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$472,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "1919 Nw 96th St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$441,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "1793 Nw 93rd Ter, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$474,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "3040 Nw 68th St, Miami, FL 33147",
+    "Owner Name": "Est. Value",
+    "Estimated Value": "$498,000",
+    "Status": "",
+    "Source ZIP": "33147"
+  },
+  {
+    "Property Address": "2040 Nw 97th St",
+    "Owner Name": "Add Lead",
+    "Estimated Value": "$210,000",
+    "Status": "Add Lead, Absentee Owner, Vacant Home",
+    "Source ZIP": "33147"
   }
 ]
